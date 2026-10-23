@@ -1,5 +1,6 @@
-"""Fast depth-only inference (fp16 encoder with SDPA attention, fp16 channels-last decoder convs), plain PyTorch.
-See depth.py."""
+"""Fast depth-only inference. FastDepth: plain PyTorch (depth.py). FastDepthMax: plus fp16 accumulation and custom
+kernels (max.py; cuda-kernels branch)."""
 from .depth import FastDepth
+from .max import FastDepthMax
 
-__all__ = ["FastDepth"]
+__all__ = ["FastDepth", "FastDepthMax"]

@@ -1,3 +1,26 @@
+# UniK3D: faster inference fork
+
+> **You are on `portable`.** Research fork of [lpiccinelli-eth/UniK3D](https://github.com/lpiccinelli-eth/UniK3D) (base `29f7862`, 2025-09-14; `main` mirrors upstream). Two branches:
+> - [`portable`](https://github.com/fastforks/UniK3D/tree/portable): `unik3d.fast.FastDepth(model)`, an fp16 depth-only inference path in plain PyTorch (SDPA attention, final norm only on the used ViT layers, cached position embeddings, no camera-ray / confidence outputs); no build step.
+> - [`cuda-kernels`](https://github.com/fastforks/UniK3D/tree/cuda-kernels): `portable` plus `unik3d.fast.FastDepthMax(model)`: fp16-accumulate GEMMs, head-dim-64 flash attention with fp16 accumulation, fp16-accumulate cuDNN convolutions (needs `pip install nvidia-cudnn-frontend`), NHWC resize / reflect-pad kernels. Prebuilt kernels for sm_80/86/89/90/120 (+ compute_80 PTX); without a matching prebuilt file they are compiled once with nvcc from `$CUDA_HOME`, and any part that cannot load falls back to its `FastDepth` op (`LP_FAST_KERNELS=0` turns the kernels off).
+>
+> Usage: `depth = unik3d.fast.FastDepth(model).infer(rgb, camera)["depth"]` (`FastDepthMax` has the same API; `rgb` uint8 [B,3,H,W] on the GPU, camera optional).
+> Licence, as upstream: CC BY-NC-SA 4.0 (non-commercial; see `LICENSE`). Weights are not included.
+
+`unik3d-vitl`, `resolution_level=9`, bilinear interpolation; RTX 5060 Ti 16 GB, torch 2.14.1+cu130, 2026-10-23. Median of 15 runs after 3 warm-ups; memory = torch peak allocated / reserved; Midd-H runs with the GT intrinsics, KITTI without a camera (predicted camera); AbsRel = metric depth against Middlebury-H laser GT (6 scenes, non-occluded, short check, not a full evaluation); TensorRT: not measured.
+
+| version | KITTI ms | Midd-H ms | speed-up at H (vs flags / vs upstream) | peak MB at KITTI (alloc / reserved) | peak MB at H (alloc / reserved) | startup / first call at H | Midd-H AbsRel raw / median-scaled (6 scenes, GT K) | max / mean abs diff vs upstream at H (m) |
+|---|---|---|---|---|---|---|---|---|
+| upstream (fp16 autocast, upstream default) | 131.6 | 134.5 | 1.00x | 2640 / 3216 | 2788 / 3224 | 6.9 s / 0.72 s | 0.2019 / 0.0270 | - |
+| upstream + flags (inference_mode, cudnn.benchmark, TF32) | 131.3 | 134.2 | 1.00x | 2640 / 3122 | 2788 / 3232 | 6.8 s / 1.17 s | 0.2020 / 0.0270 | 0.0697 / 0.000277 |
+| **portable** (`FastDepth`) | 103.4 | 100.9 | 1.33x / 1.33x | 1298 / 1648 | 1294 / 1554 | 6.8 s / 0.57 s | 0.2023 / 0.0271 | 0.0325 / 0.00108 |
+| **cuda-kernels** (`FastDepthMax`) | 64.9 | 62.6 | 2.14x / 2.15x | 1172 / 1412 | 1236 / 1478 | 7.1 s / 0.46 s | 0.2018 / 0.0271 | 0.296 / 0.004 |
+| cuda-kernels, LP_FAST_KERNELS=0 (fp16 accumulation only) | 88.2 | 85.7 | 1.57x / 1.57x | 1298 / 1648 | 1294 / 1554 | 6.8 s / 0.58 s | 0.2020 / 0.0271 | 0.107 / 0.00156 |
+
+upstream = unmodified upstream `model.infer` (its own fp16 autocast). upstream + flags = the same code, driver-side only: torch.inference_mode, cudnn.benchmark=True, TF32 allowed; channels_last / `.half()` not applicable without code changes (the model casts internally); torch.compile not part of the row. Startup = process start to model on the GPU; first call = the cold first call at H.
+
+---
+
 <div align="center">
 
 # UniK3D: Universal Camera Monocular 3D Estimation
